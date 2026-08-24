@@ -156,13 +156,13 @@ def dashboard():
             summary=cur.fetchone()
 
             if u["role"]=="admin":
-                cur.execute("""SELECT d::date day,
+                cur.execute("""SELECT d::date AS "day",
                     COUNT(c.id) cars,
                     COALESCE(ROUND(AVG(c.duration_seconds)/60.0,1),0) avg_min,
                     COALESCE(ROUND(100.0*AVG(CASE WHEN c.target_seconds>0 AND c.duration_seconds>0 THEN c.target_seconds::numeric/NULLIF(c.duration_seconds,0) ELSE NULL END),1),0) performance_pct
                     FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') d
                     LEFT JOIN cars c ON c.finished_at::date=d::date AND c.finished_at IS NOT NULL
-                    GROUP BY d::date ORDER BY day""")
+                    GROUP BY d::date ORDER BY "day" """)
                 daily=cur.fetchall()
                 cur.execute("""SELECT service,COUNT(*) cars,
                     COALESCE(ROUND(AVG(duration_seconds)/60.0,1),0) avg_min,
@@ -177,13 +177,13 @@ def dashboard():
                     WHERE w.role='worker' AND w.active=TRUE GROUP BY w.id ORDER BY performance_pct DESC,w.name LIMIT 6""")
                 worker_summary=cur.fetchall()
             else:
-                cur.execute("""SELECT d::date day,
+                cur.execute("""SELECT d::date AS "day",
                     COUNT(c.id) cars,
                     COALESCE(ROUND(AVG(c.duration_seconds)/60.0,1),0) avg_min,
                     COALESCE(ROUND(100.0*AVG(CASE WHEN c.target_seconds>0 AND c.duration_seconds>0 THEN c.target_seconds::numeric/NULLIF(c.duration_seconds,0) ELSE NULL END),1),0) performance_pct
                     FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') d
                     LEFT JOIN cars c ON c.finished_at::date=d::date AND c.worker_id=%s AND c.finished_at IS NOT NULL
-                    GROUP BY d::date ORDER BY day""",(u["id"],))
+                    GROUP BY d::date ORDER BY "day" """,(u["id"],))
                 daily=cur.fetchall(); service_summary=[]; worker_summary=[]
 
     return render_template("dashboard.html",user=u,active=active,workers=workers,companies=companies,services=services,
