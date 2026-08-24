@@ -2,14 +2,28 @@
 <div class="sec"><h2>🚿 Coches en proceso</h2></div><div class="jobs">{% for c in active %}<div class="job"><div class="jobtop"><div><div class="plate">{{c["plate"]}}</div><div class="meta">{{c["worker_name"]}} · {{c["service"]}}</div>{% if c["make"] or c["model"] or c["company"] %}<div class="meta">{% if c["make"] or c["model"] %}{{c["make"]}} {{c["model"]}}{% endif %}{% if c["company"] %} · {{c["company"]}}{% endif %}</div>{% endif %}</div><span class="status">EN PROCESO</span></div><div class="timer" data-start="{{c['started_at'].isoformat()}}">00:00</div>{% if user["role"]=="admin" or c["worker_id"]==user["id"] %}<form method="post" action="/cars/{{c['id']}}/finish"><button class="btn finish">Finalizar coche</button></form>{% endif %}</div>{% else %}<div class="panel empty">No hay coches en proceso.</div>{% endfor %}</div>
 <div class="sec"><h2>➕ Iniciar un coche</h2></div><form class="form" method="post" action="/cars/start" enctype="multipart/form-data" id="carForm">
 <div class="photo-box">
-  <label for="platePhoto">📷 Foto de matrícula</label>
+  <label for="platePhoto">📷 Foto del coche <span class="required">* Obligatoria</span></label>
   <input id="platePhoto" name="plate_photo" type="file" accept="image/*" capture="environment" required>
-  <div id="photoStatus" class="muted">Haz una foto clara de la matrícula. La foto se guardará en el historial.</div>
-  <img id="photoPreview" class="photo-preview" alt="Vista previa de la matrícula" hidden>
+  <div id="photoStatus" class="muted">Haz una foto del coche. Debes hacerla para poder iniciar el servicio.</div>
+  <img id="photoPreview" class="photo-preview" alt="Vista previa del coche" hidden>
 </div>
-<input name="plate" id="plateInput" placeholder="Matrícula (se reconoce automáticamente)" required>
+<input name="plate" id="plateInput" placeholder="Matrícula (ej. 1234 ABC)" required>
 <input name="make" placeholder="Marca (ej. BMW)"><input name="model" placeholder="Modelo (ej. X5)"><select name="company"><option value="">Selecciona empresa</option>{% for company in companies %}<option value="{{company['name']}}">{{company["name"]}}</option>{% endfor %}</select><select name="service"><option>Lavado completo</option><option>Lavado exterior</option><option>Lavado interior</option><option>Premium</option></select>{% if user["role"]=="admin" %}<select name="worker_id">{% for w in workers %}<option value="{{w['id']}}">{{w["name"]}}</option>{% endfor %}</select>{% endif %}<button class="btn new" id="startBtn">▶ Iniciar coche</button></form>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const photoInput=document.getElementById("platePhoto"), preview=document.getElementById("photoPreview");
+const statusEl=document.getElementById("photoStatus"), form=document.getElementById("carForm"), plateInput=document.getElementById("plateInput");
+photoInput.addEventListener("change", ()=>{
+  const file=photoInput.files[0];
+  if(!file){ preview.hidden=true; statusEl.textContent="Haz una foto del coche. Debes hacerla para poder iniciar el servicio."; return; }
+  if(!file.type.startsWith("image/")){ photoInput.value=""; preview.hidden=true; statusEl.textContent="⚠️ Selecciona una imagen."; return; }
+  preview.src=URL.createObjectURL(file); preview.hidden=false;
+  statusEl.textContent="✅ Foto preparada. La foto quedará guardada en el historial.";
+});
+form.addEventListener("submit", (e)=>{
+  if(!plateInput.value.trim()){ e.preventDefault(); alert("Introduce la matrícula."); return; }
+  if(!photoInput.files.length){ e.preventDefault(); alert("La foto del coche es obligatoria para iniciar el servicio."); }
+});
+function tick(){document.querySelectorAll(".timer").forEach(e=>{let s=new Date(e.dataset.start),x=Math.max(0,Math.floor((Date.now()-s)/1000)),m=Math.floor(x/60),r=x%60;e.textContent=String(m).padStart(2,"0")+":"+String(r).padStart(2,"0")})}tick();setInterval(tick,1000)</script>
 <script>
 const photoInput=document.getElementById("platePhoto"), preview=document.getElementById("photoPreview");
 const plateInput=document.getElementById("plateInput"), statusEl=document.getElementById("photoStatus");

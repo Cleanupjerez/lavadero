@@ -27,3 +27,7 @@ IMPORTANTE: cambia las contraseñas antes de uso real.
 
 ## Empresas
 La V6 añade una tabla de empresas/clientes con listado desplegable. Se crean inicialmente Particular, Empresa 1, Empresa 2 y Empresa 3; el administrador puede añadir, activar u ocultar empresas desde /companies.
+
+
+## V8 - Foto obligatoria del coche
+La matrícula se introduce manualmente. No se utiliza OCR. Para iniciar un servicio, el trabajador debe hacer y adjuntar una foto desde el móvil; la foto se guarda junto al registro y queda disponible en el historial.

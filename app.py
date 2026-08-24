@@ -136,7 +136,15 @@ def start_car():
     photo=request.files.get("plate_photo")
     photo_bytes=photo.read() if photo and photo.filename else None
     photo_mime=photo.mimetype if photo_bytes else None
-    if not plate: flash("Introduce la matrícula."); return redirect(url_for("dashboard"))
+    if not plate:
+        flash("Introduce la matrícula.")
+        return redirect(url_for("dashboard"))
+    if not photo_bytes:
+        flash("La foto del coche es obligatoria para iniciar el servicio.")
+        return redirect(url_for("dashboard"))
+    if not photo_mime or not photo_mime.startswith("image/"):
+        flash("El archivo debe ser una imagen.")
+        return redirect(url_for("dashboard"))
     with conn() as c:
         with c.cursor() as cur:
             cur.execute("""INSERT INTO cars(plate,service,worker_id,started_at,make,model,company,plate_photo,plate_photo_mime)
