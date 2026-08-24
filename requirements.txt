@@ -1,1 +1,4 @@
-{"deploy":{"startCommand":"gunicorn app:app --bind 0.0.0.0:$PORT","restartPolicyType":"ON_FAILURE","restartPolicyMaxRetries":10}}
+Flask>=3.0,<4
+psycopg[binary]>=3.2,<4
+Werkzeug>=3.0,<4
+gunicorn>=23,<24

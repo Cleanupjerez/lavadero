@@ -1,5 +1,1 @@
-.venv/
-__pycache__/
-*.pyc
-.env
-lavadero.db
+web: gunicorn app:app
