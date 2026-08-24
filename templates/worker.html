@@ -1,111 +1,30 @@
-<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-<title>Mi panel · Lavadero</title>
-</head>
-<body class="worker-body">
-<div class="worker-app">
-  <header class="worker-head">
-    <div class="worker-brand"><span>🚗</span><strong>LAVADERO</strong></div>
-    <div class="worker-user">👤 {{ user['name'] }} <a href="/logout">Salir</a></div>
-  </header>
-
-  <main class="worker-main">
-    <section class="worker-greeting">
-      <div class="greeting-emoji">👋</div>
-      <div><h1>¡Buenos días, {{ user['name'] }}!</h1><p>Listo para empezar.</p></div>
-    </section>
-
-    <section class="worker-section" id="new-car">
-      <div class="worker-section-title">🚗 <span>NUEVO COCHE</span></div>
-      <form method="post" action="/cars/start" enctype="multipart/form-data" id="workerCarForm">
-        <div class="worker-photo">
-          <label>1. FOTO DEL COCHE <span>* Obligatoria</span></label>
-          <input id="workerPhoto" name="plate_photo" type="file" accept="image/*" capture="environment" required>
-          <label class="camera-label" for="workerPhoto"><span class="camera-icon">📷</span><strong>HACER FOTO</strong></label>
-          <div id="workerPhotoStatus">La foto se guardará en el historial.</div>
-          <img id="workerPhotoPreview" class="worker-photo-preview" alt="Vista previa" hidden>
-        </div>
-
-        <label class="worker-label">2. MATRÍCULA *</label>
-        <input class="worker-input plate-input" name="plate" placeholder="1234 ABC" autocomplete="off" required>
-
-        <label class="worker-label">3. EMPRESA</label>
-        <select class="worker-input" name="company">
-          <option value="">Seleccionar empresa</option>
-          {% for company in companies %}<option value="{{ company['name'] }}">{{ company['name'] }}</option>{% endfor %}
-        </select>
-
-        <label class="worker-label">4. SERVICIO *</label>
-        <div class="service-buttons">
-          {% for service in services %}
-          <label class="service-choice">
-            <input type="radio" name="service" value="{{ service['name'] }}" required>
-            <span class="service-card"><span class="service-symbol">{% if 'exterior' in service['name'].lower() and 'interior' not in service['name'].lower() %}🚿{% elif 'integral' in service['name'].lower() %}✨{% else %}🔄{% endif %}</span><strong>{{ service['name'].replace('Lavado ','') }}</strong><b>{{ service['target_seconds']//60 }} min</b></span>
-          </label>
-          {% endfor %}
-        </div>
-        <input type="hidden" name="make" value="">
-        <input type="hidden" name="model" value="">
-        <button class="worker-start" id="workerStart">▶ INICIAR COCHE</button>
-        <div class="worker-lock">🔒 Completa todos los campos para iniciar</div>
-      </form>
-    </section>
-
-    <section class="worker-section process-worker" id="process">
-      <div class="worker-process-title"><span>🚗 COCHE EN PROCESO</span><em>Activo</em></div>
-      {% for c in active %}
-      <div class="worker-active-card">
-        <div class="active-vehicle"><div class="active-plate">{{ c['plate'] }}</div><div class="active-model">{{ c['make'] or '' }} {{ c['model'] or '' }}</div><div class="active-company">🏢 {{ c['company'] or 'Particular' }}</div><div class="active-service">🧽 {{ c['service'] }}</div></div>
-        <div class="worker-timer-label">TIEMPO TRANSCURRIDO</div>
-        <div class="worker-timer timer" data-start="{{ c['started_at'].isoformat() }}">00:00:00</div>
-        <div class="worker-target">OBJETIVO<br><strong>{{ '%02d:%02d:00'|format((c['target_seconds'] or 0)//3600, ((c['target_seconds'] or 0)%3600)//60) }}</strong></div>
-        <div class="worker-progress"><div class="worker-progress-bar" data-target="{{ c['target_seconds'] or 0 }}"></div></div>
-        <div class="worker-status status-good">● Dentro del objetivo</div>
-        {% if c['plate_photo'] %}<a class="worker-photo-link" href="{{ url_for('plate_photo',car_id=c['id']) }}" target="_blank">📷 Ver foto</a>{% endif %}
-        <form method="post" action="/cars/{{ c['id'] }}/finish"><button class="worker-finish">■ &nbsp; FINALIZAR COCHE</button></form>
-      </div>
-      {% else %}
-      <div class="worker-empty">No tienes ningún coche en proceso.</div>
-      {% endfor %}
-    </section>
-
-    <section class="worker-section" id="stats">
-      <div class="worker-section-title">📊 <span>MIS ESTADÍSTICAS</span></div>
-      <div class="stats-period">Últimos 7 días <small>(solo días trabajados cuentan para la media)</small></div>
-      <div class="worker-kpis">
-        <div><b>{{ summary['cars'] }}</b><span>Coches realizados</span></div>
-        <div><b>{{ summary['worked_days'] }}</b><span>Días trabajados</span></div>
-        <div><b>{{ summary['cars_per_worked_day'] }}</b><span>Coches / día trabajado</span></div>
-        <div><b>{{ summary['avg_min'] }} min</b><span>Tiempo medio</span></div>
-        <div><b>{{ summary['performance_pct'] }}%</b><span>Rendimiento</span></div>
-        <div><b>{{ summary['on_time_pct'] }}%</b><span>Dentro del objetivo</span></div>
-      </div>
-      <div class="worker-chart-title">EVOLUCIÓN ÚLTIMOS 7 DÍAS</div>
-      <div class="worker-chart">
-        {% for d in daily %}
-        <div class="worker-chart-col">
-          {% if d['cars']|int > 0 %}<b>{{ d['cars'] }}</b><div class="worker-bar" style="height:{{ [d['cars']*18, 18]|max }}px"></div>{% else %}<span class="no-activity">Sin<br>actividad</span>{% endif %}
-          <small>{{ d['day'].strftime('%a')|capitalize }}<br>{{ d['day'].strftime('%d/%m') }}</small>
-        </div>
-        {% endfor %}
-      </div>
-    </section>
-  </main>
-
-  <nav class="worker-bottom">
-    <a class="active" href="#new-car"><span>＋</span>Nuevo coche</a>
-    <a href="#process"><span>◷</span>En proceso</a>
-    <a href="#stats"><span>▥</span>Mis estadísticas</a>
-  </nav>
-</div>
+<!doctype html><html lang="es"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><title>Trabajador</title></head><body>
+<header class="top"><h1>🚗 Lavadero · {{user[2]}}</h1><p>Mi trabajo y mis estadísticas</p></header><main class="container">
+{% with messages=get_flashed_messages(with_categories=true) %}{% for c,m in messages %}<div class="flash {{'success' if c=='success' else ''}}">{{m}}</div>{% endfor %}{% endwith %}
+{% if active %}
+<div class="card"><h2 style="margin-top:0">🚗 {{active[1]}}</h2><p>{{active[2] or ''}} {{active[3] or ''}} · {{active[4]}}</p><span class="pill">{{active[5]}}</span><div style="height:18px"></div><div class="big-time" id="timer">00:00:00</div><div class="target">Objetivo: {{active[6]}} min</div><div style="height:16px"></div>
+{% if active[5] == 'Repaso' %}<a class="btn light" href="#checklist">📋 ABRIR CHECKLIST</a>{% endif %}
+<div style="height:10px"></div><form method="post" action="/finish/{{active[0]}}"><button class="btn danger">🔴 FINALIZAR COCHE</button></form></div>
+{% if active[5] == 'Repaso' %}<div class="card" id="checklist"><h2>📋 Checklist de repaso</h2><form method="post" action="/checklist/{{active[0]}}">
+{% for item in checklist %}<div class="check-item"><strong>{{loop.index}}. {{item}}</strong><div class="checks"><label><input type="checkbox" name="ok_{{loop.index0}}" value="1"> OK</label><label><input type="checkbox" name="reviewed_{{loop.index0}}" value="1"> REPASADO</label></div></div>{% endfor %}
+<button class="btn">GUARDAR CHECKLIST</button></form></div>{% endif %}
+{% else %}
+<div class="card"><h2 style="margin-top:0">🚗 NUEVO COCHE</h2><form method="post" action="/start" onsubmit="return validateStart()">
+<label>📷 Foto del coche</label><input id="photo" type="file" accept="image/*" capture="environment" required>
+<label>Matrícula</label><input name="plate" placeholder="1234 ABC" required>
+<div class="row"><div><label>Marca</label><input name="brand"></div><div><label>Modelo</label><input name="model"></div></div>
+<label>Empresa</label><div class="company-grid">{% for c in companies %}<button type="button" class="choice company" data-value="{{c}}">{{c}}</button>{% endfor %}</div><input type="hidden" name="company" id="company">
+<label>Servicio</label><div class="service-grid">{% for s,t in services.items() %}<button type="button" class="choice service" data-value="{{s}}">{{s}} · {{t}} min</button>{% endfor %}</div><input type="hidden" name="service" id="service">
+<div style="height:14px"></div><button class="btn" id="startBtn" disabled>🔵 INICIAR COCHE</button></form></div>
+<div class="grid2"><div class="card stat"><b>{{stats[0]}}</b><span>🚗 COCHES · 7 DÍAS</span></div><div class="card stat"><b>{{'%.0f'|format(stats[2])}}</b><span>⏱️ TIEMPO MEDIO · MIN</span></div></div>
+{% endif %}
+</main>
+<nav class="nav"><a class="active" href="/worker">🚗<br>Nuevo</a><a href="/worker">⏱️<br>En proceso</a><a href="/worker">📊<br>Mis datos</a><a href="/change-password">🔐<br>Perfil</a><a href="/logout">↪<br>Salir</a></nav>
 <script>
-const photo=document.getElementById('workerPhoto'), preview=document.getElementById('workerPhotoPreview'), status=document.getElementById('workerPhotoStatus');
-photo?.addEventListener('change',()=>{const f=photo.files[0]; if(!f)return; preview.src=URL.createObjectURL(f); preview.hidden=false; status.textContent='✅ Foto preparada. Se guardará en el historial.';});
-const form=document.getElementById('workerCarForm'); form?.addEventListener('submit',e=>{const plate=form.querySelector('[name=plate]').value.trim();const service=form.querySelector('[name=service]:checked');if(!photo.files.length||!plate||!service){e.preventDefault();alert(!photo.files.length?'La foto del coche es obligatoria.':!plate?'Introduce la matrícula.':'Selecciona un servicio.');}});
-function tick(){document.querySelectorAll('.timer').forEach(e=>{const s=new Date(e.dataset.start),x=Math.max(0,Math.floor((Date.now()-s)/1000));const h=Math.floor(x/3600),m=Math.floor((x%3600)/60),r=x%60;e.textContent=[h,m,r].map(v=>String(v).padStart(2,'0')).join(':');const card=e.closest('.worker-active-card');const bar=card?.querySelector('.worker-progress-bar');const target=Number(bar?.dataset.target||0);if(bar&&target){bar.style.width=Math.min(100,x/target*100)+'%';const st=card.querySelector('.worker-status');const diff=target-x;if(diff>=0){st.className='worker-status status-good';st.textContent='● Dentro del objetivo';}else if(diff>-300){st.className='worker-status status-warn';st.textContent='● Cerca del límite';}else{st.className='worker-status status-bad';st.textContent='● Tiempo objetivo superado';}}});} tick();setInterval(tick,1000);
-</script>
-</body></html>
+const companies=[...document.querySelectorAll('.company')], services=[...document.querySelectorAll('.service')];
+function selectGroup(nodes,target){nodes.forEach(n=>n.addEventListener('click',()=>{nodes.forEach(x=>x.classList.remove('selected'));n.classList.add('selected');document.getElementById(target).value=n.dataset.value;update();}));}
+selectGroup(companies,'company');selectGroup(services,'service');
+function update(){const ok=document.getElementById('photo')?.files.length && document.getElementById('company')?.value && document.getElementById('service')?.value; if(document.getElementById('startBtn'))document.getElementById('startBtn').disabled=!ok;}
+document.getElementById('photo')?.addEventListener('change',update);
+function validateStart(){update();return !document.getElementById('startBtn').disabled;}
+</script></body></html>
