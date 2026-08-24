@@ -13,7 +13,7 @@ if not DATABASE_URL:
     raise RuntimeError("Falta DATABASE_URL. En Railway debe estar conectada la base PostgreSQL.")
 
 def conn():
-    return psycopg.connect(DATABASE_URL)
+   return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 def init_db():
     with conn() as c:
