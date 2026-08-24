@@ -36,6 +36,10 @@ def init_db():
                 id SERIAL PRIMARY KEY, car_id INTEGER REFERENCES cars(id) ON DELETE CASCADE,
                 item TEXT NOT NULL, ok BOOLEAN DEFAULT FALSE, reviewed BOOLEAN DEFAULT FALSE,
                 UNIQUE(car_id,item))""")
+            c.execute("ALTER TABLE checklist_items ADD COLUMN IF NOT EXISTS status TEXT DEFAULT NULL")
+            c.execute("""UPDATE checklist_items
+                         SET status=CASE WHEN reviewed THEN 'repasado' WHEN ok THEN 'ok' ELSE NULL END
+                         WHERE status IS NULL""")
             defaults=[("admin","Administrador","admin","admin123")]+[(x.lower(),x,"worker","1234") for x in WORKERS]
             for u,n,r,p in defaults:
                 c.execute("""INSERT INTO users(username,name,role,password_hash,must_change_password)
@@ -163,8 +167,11 @@ def checklist_save(cid):
             c.execute("SELECT id FROM cars WHERE id=%s AND worker_id=%s AND service='Repaso' AND finished_at IS NULL",(cid,u[0],))
             if not c.fetchone():return redirect(url_for("worker"))
             for i,item in enumerate(CHECKLIST):
-                c.execute("UPDATE checklist_items SET ok=%s,reviewed=%s WHERE car_id=%s AND item=%s",
-                          (request.form.get(f"ok_{i}")=="1",request.form.get(f"reviewed_{i}")=="1",cid,item))
+                status=request.form.get(f"status_{i}") or None
+                c.execute("""UPDATE checklist_items
+                             SET status=%s, ok=%s, reviewed=%s
+                             WHERE car_id=%s AND item=%s""",
+                          (status, status=="ok", status=="repasado", cid, item))
         conn.commit()
     flash("Checklist guardado.","success"); return redirect(url_for("worker"))
 
@@ -177,7 +184,7 @@ def finish(cid):
             c.execute("SELECT service FROM cars WHERE id=%s AND worker_id=%s AND finished_at IS NULL",(cid,u[0],)); r=c.fetchone()
             if not r:return redirect(url_for("worker"))
             if r[0]=="Repaso":
-                c.execute("SELECT COUNT(*) FROM checklist_items WHERE car_id=%s AND (NOT ok OR NOT reviewed)",(cid,))
+                c.execute("SELECT COUNT(*) FROM checklist_items WHERE car_id=%s AND status IS NULL",(cid,))
                 if c.fetchone()[0]:
                     flash("Completa todos los puntos del checklist.","error"); return redirect(url_for("worker"))
                 c.execute("UPDATE cars SET checklist_status='done' WHERE id=%s",(cid,))
