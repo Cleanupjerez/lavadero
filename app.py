@@ -4,6 +4,7 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 import psycopg
+from psycopg.rows import dict_row
 
 app=Flask(__name__)
 app.secret_key=os.environ.get("SECRET_KEY", secrets.token_hex(32))
