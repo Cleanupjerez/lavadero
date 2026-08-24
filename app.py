@@ -8,6 +8,7 @@ from psycopg.rows import dict_row
 
 app=Flask(__name__)
 app.secret_key=os.environ.get("SECRET_KEY", secrets.token_hex(32))
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 DATABASE_URL=os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("Falta DATABASE_URL. En Railway debe estar conectada la base PostgreSQL.")
@@ -31,7 +32,7 @@ def init_db():
                 id SERIAL PRIMARY KEY, plate TEXT NOT NULL, service TEXT NOT NULL,
                 worker_id INTEGER NOT NULL REFERENCES workers(id),
                 started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), finished_at TIMESTAMPTZ,
-                duration_seconds INTEGER, notes TEXT, make TEXT, model TEXT, company TEXT
+                duration_seconds INTEGER, notes TEXT, make TEXT, model TEXT, company TEXT, plate_photo BYTEA, plate_photo_mime TEXT
             )"""
             )
             for company in ["Particular", "Empresa 1", "Empresa 2", "Empresa 3"]:
@@ -40,6 +41,8 @@ def init_db():
             cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS make TEXT")
             cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS model TEXT")
             cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS company TEXT")
+            cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS plate_photo BYTEA")
+            cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS plate_photo_mime TEXT")
             users=[
                 ("admin","Administrador","admin","1234"),("juan","Juan","worker","1234"),
                 ("pedro","Pedro","worker","1234"),("antonio","Antonio","worker","1234"),
@@ -130,13 +133,31 @@ def start_car():
     model=request.form.get("model","").strip()
     company=request.form.get("company","").strip()
     worker_id=u["id"] if u["role"]!="admin" else int(request.form.get("worker_id"))
+    photo=request.files.get("plate_photo")
+    photo_bytes=photo.read() if photo and photo.filename else None
+    photo_mime=photo.mimetype if photo_bytes else None
     if not plate: flash("Introduce la matrícula."); return redirect(url_for("dashboard"))
     with conn() as c:
         with c.cursor() as cur:
-            cur.execute("""INSERT INTO cars(plate,service,worker_id,started_at,make,model,company)
-                           VALUES(%s,%s,%s,NOW(),%s,%s,%s)""",
-                        (plate,service,worker_id,make,model,company))
+            cur.execute("""INSERT INTO cars(plate,service,worker_id,started_at,make,model,company,plate_photo,plate_photo_mime)
+                           VALUES(%s,%s,%s,NOW(),%s,%s,%s,%s,%s)""",
+                        (plate,service,worker_id,make,model,company,photo_bytes,photo_mime))
     return redirect(url_for("dashboard"))
+
+@app.get("/cars/<int:car_id>/plate-photo")
+@login_required
+def plate_photo(car_id):
+    u=current_user()
+    with conn() as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT plate_photo,plate_photo_mime,worker_id FROM cars WHERE id=%s",(car_id,))
+            car=cur.fetchone()
+    if not car or not car["plate_photo"]:
+        return "Foto no disponible",404
+    if u["role"]!="admin" and car["worker_id"]!=u["id"]:
+        return "No autorizado",403
+    from flask import Response
+    return Response(car["plate_photo"], mimetype=car["plate_photo_mime"] or "image/jpeg")
 
 @app.post("/cars/<int:car_id>/finish")
 @login_required

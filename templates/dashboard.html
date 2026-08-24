@@ -1,4 +1,34 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="{{url_for('static',filename='style.css')}}"><title>Lavadero</title></head><body><div class="app"><header class="head"><div><div class="brand">🚗 LAVADERO</div><div class="sub">Control de coches y tiempos</div></div><div class="user">{{user["name"]}}{% if user["role"]=="admin" %} · Admin{% endif %}<a href="/logout">Salir</a></div></header><nav class="nav"><a href="/" class="active">Inicio</a>{% if user["role"]=="admin" %}<a href="/stats">Estadísticas</a><a href="/workers">Trabajadores</a><a href="/companies">Empresas</a>{% endif %}<a href="/history">Historial</a></nav><main class="main"><div class="stats"><div class="card"><div class="label">Coches terminados hoy</div><div class="num">{{completed}}</div></div><div class="card"><div class="label">En proceso</div><div class="num">{{active|length}}</div></div><div class="card"><div class="label">Trabajadores</div><div class="num">{{workers|length}}</div></div><div class="card"><div class="label">Cuenta</div><div class="num" style="font-size:19px">{{"Administrador" if user["role"]=="admin" else "Trabajador"}}</div></div></div>
 <div class="sec"><h2>🚿 Coches en proceso</h2></div><div class="jobs">{% for c in active %}<div class="job"><div class="jobtop"><div><div class="plate">{{c["plate"]}}</div><div class="meta">{{c["worker_name"]}} · {{c["service"]}}</div>{% if c["make"] or c["model"] or c["company"] %}<div class="meta">{% if c["make"] or c["model"] %}{{c["make"]}} {{c["model"]}}{% endif %}{% if c["company"] %} · {{c["company"]}}{% endif %}</div>{% endif %}</div><span class="status">EN PROCESO</span></div><div class="timer" data-start="{{c['started_at'].isoformat()}}">00:00</div>{% if user["role"]=="admin" or c["worker_id"]==user["id"] %}<form method="post" action="/cars/{{c['id']}}/finish"><button class="btn finish">Finalizar coche</button></form>{% endif %}</div>{% else %}<div class="panel empty">No hay coches en proceso.</div>{% endfor %}</div>
-<div class="sec"><h2>➕ Iniciar un coche</h2></div><form class="form" method="post" action="/cars/start"><input name="plate" placeholder="Matrícula" required><input name="make" placeholder="Marca (ej. BMW)"><input name="model" placeholder="Modelo (ej. X5)"><select name="company"><option value="">Selecciona empresa</option>{% for company in companies %}<option value="{{company['name']}}">{{company["name"]}}</option>{% endfor %}</select><select name="service"><option>Lavado completo</option><option>Lavado exterior</option><option>Lavado interior</option><option>Premium</option></select>{% if user["role"]=="admin" %}<select name="worker_id">{% for w in workers %}<option value="{{w['id']}}">{{w["name"]}}</option>{% endfor %}</select>{% endif %}<button class="btn new">▶ Iniciar coche</button></form>
-<script>function tick(){document.querySelectorAll(".timer").forEach(e=>{let s=new Date(e.dataset.start),x=Math.max(0,Math.floor((Date.now()-s)/1000)),m=Math.floor(x/60),r=x%60;e.textContent=String(m).padStart(2,"0")+":"+String(r).padStart(2,"0")})}tick();setInterval(tick,1000)</script></main></div></body></html>
+<div class="sec"><h2>➕ Iniciar un coche</h2></div><form class="form" method="post" action="/cars/start" enctype="multipart/form-data" id="carForm">
+<div class="photo-box">
+  <label for="platePhoto">📷 Foto de matrícula</label>
+  <input id="platePhoto" name="plate_photo" type="file" accept="image/*" capture="environment" required>
+  <div id="photoStatus" class="muted">Haz una foto clara de la matrícula. La foto se guardará en el historial.</div>
+  <img id="photoPreview" class="photo-preview" alt="Vista previa de la matrícula" hidden>
+</div>
+<input name="plate" id="plateInput" placeholder="Matrícula (se reconoce automáticamente)" required>
+<input name="make" placeholder="Marca (ej. BMW)"><input name="model" placeholder="Modelo (ej. X5)"><select name="company"><option value="">Selecciona empresa</option>{% for company in companies %}<option value="{{company['name']}}">{{company["name"]}}</option>{% endfor %}</select><select name="service"><option>Lavado completo</option><option>Lavado exterior</option><option>Lavado interior</option><option>Premium</option></select>{% if user["role"]=="admin" %}<select name="worker_id">{% for w in workers %}<option value="{{w['id']}}">{{w["name"]}}</option>{% endfor %}</select>{% endif %}<button class="btn new" id="startBtn">▶ Iniciar coche</button></form>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const photoInput=document.getElementById("platePhoto"), preview=document.getElementById("photoPreview");
+const plateInput=document.getElementById("plateInput"), statusEl=document.getElementById("photoStatus");
+function normalizePlate(text){
+  let t=(text||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  const m=t.match(/(\d{4})[A-Z]{3}/);
+  if(m){ const idx=t.indexOf(m[0]); return t.slice(idx,idx+7).replace(/(.{4})(.{3})/,"$1 $2"); }
+  const m2=t.match(/[A-Z]{1,2}\d{4}[A-Z]{1,2}/);
+  return m2 ? m2[0] : "";
+}
+photoInput.addEventListener("change", async ()=>{
+  const file=photoInput.files[0]; if(!file)return;
+  preview.src=URL.createObjectURL(file); preview.hidden=false;
+  statusEl.textContent="📷 Foto preparada. Reconociendo matrícula...";
+  try{
+    const result=await Tesseract.recognize(file,"eng",{logger:m=>{if(m.status==="recognizing text") statusEl.textContent="🤖 Reconociendo matrícula… "+Math.round((m.progress||0)*100)+"%";}});
+    const plate=normalizePlate(result.data.text);
+    if(plate){ plateInput.value=plate; statusEl.textContent="✅ Matrícula reconocida: "+plate+" · La foto se guardará en el historial."; }
+    else statusEl.textContent="⚠️ No he podido leerla. Revisa la foto y escribe la matrícula manualmente. La foto se guardará igualmente.";
+  }catch(e){ statusEl.textContent="⚠️ No se pudo reconocer automáticamente. Escribe la matrícula manualmente. La foto se guardará igualmente."; }
+});
+function tick(){document.querySelectorAll(".timer").forEach(e=>{let s=new Date(e.dataset.start),x=Math.max(0,Math.floor((Date.now()-s)/1000)),m=Math.floor(x/60),r=x%60;e.textContent=String(m).padStart(2,"0")+":"+String(r).padStart(2,"0")})}tick();setInterval(tick,1000)</script></main></div></body></html>
