@@ -1,21 +1,5 @@
-# Lavadero V10
+# Lavadero V12
 
-Versión móvil responsive con resumen de productividad de los últimos 7 días.
+V12: pantalla móvil de trabajador clara y simple, con foto obligatoria, matrícula manual, empresa, servicios, cronómetro, botón rojo de finalizar y estadísticas privadas. Los días sin actividad no cuentan como días trabajados.
 
-Incluye:
-- Login de administrador y trabajadores.
-- PostgreSQL con migraciones automáticas.
-- Matrícula manual y foto obligatoria del coche.
-- Marca, modelo y empresa predeterminada.
-- Servicios con tiempos objetivo:
-  - Lavado exterior: 30 min
-  - Lavado interior + exterior: 90 min
-  - Limpieza integral: 150 min
-  - Repaso coche: 15 min
-- Cronómetro en tiempo real.
-- Historial con foto.
-- Resumen del lavadero de los últimos 7 días.
-- Rendimiento global, por servicio y por trabajador.
-- Gestión de trabajadores, empresas y servicios.
-
-Railway: usa el Procfile y la variable PORT automáticamente.
+Mantener DATABASE_URL y SECRET_KEY en Railway. No requiere railway.json.

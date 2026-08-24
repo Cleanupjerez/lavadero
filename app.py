@@ -127,8 +127,11 @@ def dashboard():
                 cur.execute("""SELECT c.*,w.name worker_name FROM cars c JOIN workers w ON w.id=c.worker_id
                                WHERE c.finished_at IS NULL AND c.worker_id=%s ORDER BY c.started_at""",(u["id"],))
                 active=cur.fetchall()
-            cur.execute("SELECT id,name FROM workers WHERE active=TRUE AND role='worker' ORDER BY name")
-            workers=cur.fetchall()
+            if u["role"]=="admin":
+                cur.execute("SELECT id,name FROM workers WHERE active=TRUE AND role='worker' ORDER BY name")
+                workers=cur.fetchall()
+            else:
+                workers=[]
             cur.execute("SELECT id,name FROM companies WHERE active=TRUE ORDER BY name")
             companies=cur.fetchall()
             cur.execute("SELECT id,name,target_seconds FROM services WHERE active=TRUE ORDER BY name")
@@ -154,6 +157,20 @@ def dashboard():
                     FROM cars
                     WHERE finished_at IS NOT NULL AND worker_id=%s AND finished_at >= CURRENT_DATE - INTERVAL '6 days'""",(u["id"],))
             summary=cur.fetchone()
+            # Para trabajadores: los días sin ningún coche NO cuentan como días trabajados.
+            if u["role"]!="admin":
+                cur.execute("""SELECT
+                    COUNT(DISTINCT finished_at::date) AS worked_days,
+                    COALESCE(ROUND(COUNT(*)::numeric / NULLIF(COUNT(DISTINCT finished_at::date),0),1),0) AS cars_per_worked_day
+                    FROM cars
+                    WHERE finished_at IS NOT NULL AND worker_id=%s
+                      AND finished_at >= CURRENT_DATE - INTERVAL '6 days'""", (u["id"],))
+                work_metrics=cur.fetchone()
+                summary["worked_days"]=work_metrics["worked_days"] or 0
+                summary["cars_per_worked_day"]=work_metrics["cars_per_worked_day"] or 0
+            else:
+                summary["worked_days"]=None
+                summary["cars_per_worked_day"]=None
 
             if u["role"]=="admin":
                 cur.execute("""SELECT d::date AS "day",
@@ -184,9 +201,18 @@ def dashboard():
                     FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') d
                     LEFT JOIN cars c ON c.finished_at::date=d::date AND c.worker_id=%s AND c.finished_at IS NOT NULL
                     GROUP BY d::date ORDER BY "day" """,(u["id"],))
-                daily=cur.fetchall(); service_summary=[]; worker_summary=[]
+                daily=cur.fetchall()
+                cur.execute("""SELECT service,COUNT(*) cars,
+                    COALESCE(ROUND(AVG(duration_seconds)/60.0,1),0) avg_min,
+                    COALESCE(ROUND(AVG(target_seconds)/60.0,1),0) target_min
+                    FROM cars WHERE finished_at IS NOT NULL AND worker_id=%s
+                    AND finished_at >= CURRENT_DATE - INTERVAL '6 days'
+                    GROUP BY service ORDER BY cars DESC, service LIMIT 6""",(u["id"],))
+                service_summary=cur.fetchall()
+                worker_summary=[]
 
-    return render_template("dashboard.html",user=u,active=active,workers=workers,companies=companies,services=services,
+    template = "dashboard.html" if u["role"]=="admin" else "worker.html"
+    return render_template(template,user=u,active=active,workers=workers,companies=companies,services=services,
                            summary=summary,daily=daily,service_summary=service_summary,worker_summary=worker_summary)
 
 @app.post("/cars/start")
