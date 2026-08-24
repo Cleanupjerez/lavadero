@@ -1,48 +1,103 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="{{url_for('static',filename='style.css')}}"><title>Lavadero</title></head><body><div class="app"><header class="head"><div><div class="brand">🚗 LAVADERO</div><div class="sub">Control de coches y tiempos</div></div><div class="user">{{user["name"]}}{% if user["role"]=="admin" %} · Admin{% endif %}<a href="/logout">Salir</a></div></header><nav class="nav"><a href="/" class="active">Inicio</a>{% if user["role"]=="admin" %}<a href="/stats">Estadísticas</a><a href="/workers">Trabajadores</a><a href="/companies">Empresas</a>{% endif %}<a href="/history">Historial</a></nav><main class="main"><div class="stats"><div class="card"><div class="label">Coches terminados hoy</div><div class="num">{{completed}}</div></div><div class="card"><div class="label">En proceso</div><div class="num">{{active|length}}</div></div><div class="card"><div class="label">Trabajadores</div><div class="num">{{workers|length}}</div></div><div class="card"><div class="label">Cuenta</div><div class="num" style="font-size:19px">{{"Administrador" if user["role"]=="admin" else "Trabajador"}}</div></div></div>
-<div class="sec"><h2>🚿 Coches en proceso</h2></div><div class="jobs">{% for c in active %}<div class="job"><div class="jobtop"><div><div class="plate">{{c["plate"]}}</div><div class="meta">{{c["worker_name"]}} · {{c["service"]}}</div>{% if c["make"] or c["model"] or c["company"] %}<div class="meta">{% if c["make"] or c["model"] %}{{c["make"]}} {{c["model"]}}{% endif %}{% if c["company"] %} · {{c["company"]}}{% endif %}</div>{% endif %}</div><span class="status">EN PROCESO</span></div><div class="timer" data-start="{{c['started_at'].isoformat()}}">00:00</div>{% if user["role"]=="admin" or c["worker_id"]==user["id"] %}<form method="post" action="/cars/{{c['id']}}/finish"><button class="btn finish">Finalizar coche</button></form>{% endif %}</div>{% else %}<div class="panel empty">No hay coches en proceso.</div>{% endfor %}</div>
-<div class="sec"><h2>➕ Iniciar un coche</h2></div><form class="form" method="post" action="/cars/start" enctype="multipart/form-data" id="carForm">
-<div class="photo-box">
-  <label for="platePhoto">📷 Foto del coche <span class="required">* Obligatoria</span></label>
-  <input id="platePhoto" name="plate_photo" type="file" accept="image/*" capture="environment" required>
-  <div id="photoStatus" class="muted">Haz una foto del coche. Debes hacerla para poder iniciar el servicio.</div>
-  <img id="photoPreview" class="photo-preview" alt="Vista previa del coche" hidden>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <link rel="stylesheet" href="{{url_for('static',filename='style.css')}}">
+  <title>Resumen · Lavadero</title>
+</head>
+<body>
+<div class="app" id="top">
+  <header class="head">
+    <div class="brand-wrap"><div class="brand-icon">🚗</div><div><div class="brand">Lavadero</div><div class="sub">Control de coches y tiempos</div></div></div>
+    <div class="user">{{user["name"]}}{% if user["role"]=="admin" %} · Admin{% endif %}<a href="/logout">Salir</a></div>
+  </header>
+  <nav class="nav desktop-nav">
+    <a href="/" class="active">Resumen</a>
+    {% if user["role"]=="admin" %}<a href="/stats">Estadísticas</a><a href="/workers">Trabajadores</a><a href="/companies">Empresas</a><a href="/services">Servicios</a>{% endif %}
+    <a href="/history">Historial</a>
+  </nav>
+
+  <main class="main">
+    <div class="page-title" id="summary">
+      <div><h1>Resumen del lavadero</h1><div class="period">Últimos 7 días <span>⌄</span></div></div>
+      <div class="filter-pill">⚙️ Filtros</div>
+    </div>
+
+    <section class="kpis">
+      <div class="kpi"><div class="kpi-icon blue">🚗</div><div class="kpi-value">{{summary["cars"]}}</div><div class="kpi-label">Coches realizados</div><div class="kpi-note">Últimos 7 días</div></div>
+      <div class="kpi"><div class="kpi-icon green">◷</div><div class="kpi-value">{{summary["avg_min"]}} <small>min</small></div><div class="kpi-label">Tiempo medio por coche</div><div class="kpi-note">Tiempo real</div></div>
+      <div class="kpi"><div class="kpi-icon purple">◎</div><div class="kpi-value">{{summary["performance_pct"]}}%</div><div class="kpi-label">Rendimiento global</div><div class="kpi-note">vs. tiempo objetivo</div></div>
+      <div class="kpi"><div class="kpi-icon green">✓</div><div class="kpi-value">{{summary["on_time_pct"]}}%</div><div class="kpi-label">Dentro del objetivo</div><div class="kpi-note">{{summary["cars"]|int * summary["on_time_pct"]|float / 100|round(0)|int if summary["cars"] else 0}} coches aprox.</div></div>
+      <div class="kpi"><div class="kpi-icon orange">!</div><div class="kpi-value">{{summary["late_pct"]}}%</div><div class="kpi-label">Fuera del objetivo</div><div class="kpi-note">Necesita revisión</div></div>
+      <div class="kpi"><div class="kpi-icon pale">👥</div><div class="kpi-value">{{workers|length}}</div><div class="kpi-label">Trabajadores activos</div><div class="kpi-note">Personal disponible</div></div>
+    </section>
+
+    <section class="panel performance-card">
+      <div class="section-head"><div><h2>Rendimiento global</h2><p>Comparación entre el tiempo real y el objetivo.</p></div><span class="info-dot">i</span></div>
+      <div class="performance-grid"><div><div class="big-performance">{{summary["performance_pct"]}}%</div><div class="good-text">{% if summary["performance_pct"]|float >= 100 %}Estamos por encima del objetivo{% else %}Estamos por debajo del objetivo{% endif %}</div></div><div class="target-box"><div>Tiempo objetivo medio</div><strong>{{ ((summary["avg_min"]|float) * (summary["performance_pct"]|float) / 100)|round(0)|int }} min</strong><div>Tiempo real medio</div><strong class="real">{{summary["avg_min"]}} min</strong></div></div>
+    </section>
+
+    <section class="panel chart-card">
+      <div class="section-head"><div><h2>Evolución últimos 7 días</h2><p><span class="legend-dot blue-dot"></span>Coches <span class="legend-dot green-dot"></span>Tiempo medio <span class="legend-dot purple-dot"></span>Rendimiento</p></div></div>
+      <div class="chart" id="weeklyChart">
+        {% for d in daily %}
+        <div class="chart-col" data-cars="{{d['cars']}}" data-performance="{{d['performance_pct']}}" data-avg="{{d['avg_min']}}">
+          <div class="chart-perf">{{d['performance_pct']|round(0)|int}}%</div>
+          <div class="bar-wrap"><div class="bar" style="height:{{ [d['cars']*4, 8]|max }}px"></div></div>
+          <div class="chart-day">{{d['day'].strftime('%a')|capitalize}}<br><span>{{d['day'].strftime('%d/%m')}}</span></div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="panel" id="services">
+      <div class="section-head"><h2>Servicios más realizados</h2><a href="/services">Ver todos</a></div>
+      <div class="service-list">
+        {% for r in service_summary %}
+        <div class="service-row"><div class="service-icon">{% if 'exterior' in r['service'].lower() and 'interior' not in r['service'].lower() %}🚿{% elif 'integral' in r['service'].lower() %}✨{% else %}🔄{% endif %}</div><div class="service-name">{{r['service']}}</div><div class="service-cars">{{r['cars']}} <span>coches</span></div><div class="service-real">{{r['avg_min']}} min</div><div class="service-target">{{r['target_min']}} min</div></div>
+        {% else %}<div class="empty">Todavía no hay servicios terminados en los últimos 7 días.</div>{% endfor %}
+      </div>
+    </section>
+
+    {% if user["role"]=="admin" %}
+    <section class="panel" id="workers-summary">
+      <div class="section-head"><h2>Rendimiento por trabajador</h2><a href="/stats">Ver todos</a></div>
+      <div class="worker-list">
+        {% for r in worker_summary %}
+        <div class="worker-row"><div class="avatar">{{r['name'][0]|upper}}</div><div class="worker-name">{{r['name']}}</div><div>{{r['cars']}} coches</div><div>{{r['avg_min']}} min</div><div class="performance-chip {% if r['performance_pct']|float >= 100 %}good{% else %}warn{% endif %}">{{r['performance_pct']}}%</div></div>
+        {% else %}<div class="empty">Todavía no hay datos de trabajadores.</div>{% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="panel process" id="process">
+      <div class="section-head"><div><h2>🚿 Coches en proceso</h2><p>Tiempo en directo.</p></div><span class="count-pill">{{active|length}} activos</span></div>
+      {% for c in active %}
+      <div class="active-car"><div><strong>{{c['plate']}}</strong><div class="muted">{{c['make'] or ''}} {{c['model'] or ''}} · {{c['company'] or 'Particular'}} · {{c['service']}}</div>{% if c['plate_photo'] %}<a class="photo-link" href="{{url_for('plate_photo',car_id=c['id'])}}" target="_blank">📷 Ver foto</a>{% endif %}</div><div class="live-time timer" data-start="{{c['started_at'].isoformat()}}">00:00</div>{% if user['role']=='admin' or c['worker_id']==user['id'] %}<form method="post" action="/cars/{{c['id']}}/finish"><button class="btn finish">Finalizar</button></form>{% endif %}</div>
+      {% else %}<div class="empty">No hay coches en proceso.</div>{% endfor %}
+    </section>
+
+    <section class="panel start-card" id="start">
+      <div class="section-head"><div><h2>➕ Iniciar un coche</h2><p>La matrícula y la foto son obligatorias.</p></div></div>
+      <form class="start-form" method="post" action="/cars/start" enctype="multipart/form-data" id="carForm">
+        <div class="photo-box"><label for="platePhoto">📷 Foto del coche <span class="required">* Obligatoria</span></label><input id="platePhoto" name="plate_photo" type="file" accept="image/*" capture="environment" required><div id="photoStatus" class="muted">Haz la foto directamente con el móvil.</div><img id="photoPreview" class="photo-preview" alt="Vista previa" hidden></div>
+        <div class="field"><label>Matrícula *</label><input name="plate" id="plateInput" placeholder="Ej. 1234 ABC" required></div>
+        <div class="field"><label>Marca</label><input name="make" placeholder="Ej. BMW"></div>
+        <div class="field"><label>Modelo</label><input name="model" placeholder="Ej. X5"></div>
+        <div class="field"><label>Empresa</label><select name="company"><option value="">Selecciona empresa</option>{% for company in companies %}<option value="{{company['name']}}">{{company['name']}}</option>{% endfor %}</select></div>
+        <div class="field"><label>Servicio *</label><select name="service" required><option value="">Selecciona servicio</option>{% for service in services %}<option value="{{service['name']}}">{{service['name']}} · {{service['target_seconds']//60}} min objetivo</option>{% endfor %}</select></div>
+        {% if user["role"]=="admin" %}<div class="field"><label>Trabajador</label><select name="worker_id">{% for w in workers %}<option value="{{w['id']}}">{{w['name']}}</option>{% endfor %}</select></div>{% endif %}
+        <button class="btn start-btn" id="startBtn">▶ Iniciar coche</button>
+      </form>
+    </section>
+  </main>
+
+  <nav class="bottom-nav"><a href="#summary">⌂<span>Resumen</span></a><a href="#process">🚗<span>Coches</span></a><a class="start-fab" href="#start">＋<span>Iniciar coche</span></a><a href="/history">◷<span>Historial</span></a><a href="{% if user['role']=='admin' %}/stats{% else %}/logout{% endif %}">•••<span>Más</span></a></nav>
 </div>
-<input name="plate" id="plateInput" placeholder="Matrícula (ej. 1234 ABC)" required>
-<input name="make" placeholder="Marca (ej. BMW)"><input name="model" placeholder="Modelo (ej. X5)"><select name="company"><option value="">Selecciona empresa</option>{% for company in companies %}<option value="{{company['name']}}">{{company["name"]}}</option>{% endfor %}</select><select name="service"><option>Lavado completo</option><option>Lavado exterior</option><option>Lavado interior</option><option>Premium</option></select>{% if user["role"]=="admin" %}<select name="worker_id">{% for w in workers %}<option value="{{w['id']}}">{{w["name"]}}</option>{% endfor %}</select>{% endif %}<button class="btn new" id="startBtn">▶ Iniciar coche</button></form>
 <script>
-const photoInput=document.getElementById("platePhoto"), preview=document.getElementById("photoPreview");
-const statusEl=document.getElementById("photoStatus"), form=document.getElementById("carForm"), plateInput=document.getElementById("plateInput");
-photoInput.addEventListener("change", ()=>{
-  const file=photoInput.files[0];
-  if(!file){ preview.hidden=true; statusEl.textContent="Haz una foto del coche. Debes hacerla para poder iniciar el servicio."; return; }
-  if(!file.type.startsWith("image/")){ photoInput.value=""; preview.hidden=true; statusEl.textContent="⚠️ Selecciona una imagen."; return; }
-  preview.src=URL.createObjectURL(file); preview.hidden=false;
-  statusEl.textContent="✅ Foto preparada. La foto quedará guardada en el historial.";
-});
-form.addEventListener("submit", (e)=>{
-  if(!plateInput.value.trim()){ e.preventDefault(); alert("Introduce la matrícula."); return; }
-  if(!photoInput.files.length){ e.preventDefault(); alert("La foto del coche es obligatoria para iniciar el servicio."); }
-});
-function tick(){document.querySelectorAll(".timer").forEach(e=>{let s=new Date(e.dataset.start),x=Math.max(0,Math.floor((Date.now()-s)/1000)),m=Math.floor(x/60),r=x%60;e.textContent=String(m).padStart(2,"0")+":"+String(r).padStart(2,"0")})}tick();setInterval(tick,1000)</script>
-<script>
-const photoInput=document.getElementById("platePhoto"), preview=document.getElementById("photoPreview");
-const plateInput=document.getElementById("plateInput"), statusEl=document.getElementById("photoStatus");
-function normalizePlate(text){
-  let t=(text||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-  const m=t.match(/(\d{4})[A-Z]{3}/);
-  if(m){ const idx=t.indexOf(m[0]); return t.slice(idx,idx+7).replace(/(.{4})(.{3})/,"$1 $2"); }
-  const m2=t.match(/[A-Z]{1,2}\d{4}[A-Z]{1,2}/);
-  return m2 ? m2[0] : "";
-}
-photoInput.addEventListener("change", async ()=>{
-  const file=photoInput.files[0]; if(!file)return;
-  preview.src=URL.createObjectURL(file); preview.hidden=false;
-  statusEl.textContent="📷 Foto preparada. Reconociendo matrícula...";
-  try{
-    const result=await Tesseract.recognize(file,"eng",{logger:m=>{if(m.status==="recognizing text") statusEl.textContent="🤖 Reconociendo matrícula… "+Math.round((m.progress||0)*100)+"%";}});
-    const plate=normalizePlate(result.data.text);
-    if(plate){ plateInput.value=plate; statusEl.textContent="✅ Matrícula reconocida: "+plate+" · La foto se guardará en el historial."; }
-    else statusEl.textContent="⚠️ No he podido leerla. Revisa la foto y escribe la matrícula manualmente. La foto se guardará igualmente.";
-  }catch(e){ statusEl.textContent="⚠️ No se pudo reconocer automáticamente. Escribe la matrícula manualmente. La foto se guardará igualmente."; }
-});
-function tick(){document.querySelectorAll(".timer").forEach(e=>{let s=new Date(e.dataset.start),x=Math.max(0,Math.floor((Date.now()-s)/1000)),m=Math.floor(x/60),r=x%60;e.textContent=String(m).padStart(2,"0")+":"+String(r).padStart(2,"0")})}tick();setInterval(tick,1000)</script></main></div></body></html>
+const photoInput=document.getElementById('platePhoto'),preview=document.getElementById('photoPreview'),statusEl=document.getElementById('photoStatus'),form=document.getElementById('carForm'),plateInput=document.getElementById('plateInput');
+photoInput?.addEventListener('change',()=>{const file=photoInput.files[0];if(!file){preview.hidden=true;statusEl.textContent='Haz la foto directamente con el móvil.';return;}if(!file.type.startsWith('image/')){photoInput.value='';preview.hidden=true;statusEl.textContent='⚠️ Selecciona una imagen.';return;}preview.src=URL.createObjectURL(file);preview.hidden=false;statusEl.textContent='✅ Foto preparada. Se guardará en el historial.';});
+form?.addEventListener('submit',e=>{if(!plateInput.value.trim()||!photoInput.files.length){e.preventDefault();alert(!plateInput.value.trim()?'Introduce la matrícula.':'La foto del coche es obligatoria.');}});
+function tick(){document.querySelectorAll('.timer').forEach(e=>{let s=new Date(e.dataset.start),x=Math.max(0,Math.floor((Date.now()-s)/1000)),m=Math.floor(x/60),r=x%60;e.textContent=String(m).padStart(2,'0')+':'+String(r).padStart(2,'0')})}tick();setInterval(tick,1000);
+</script>
+</body></html>

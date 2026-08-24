@@ -28,21 +28,34 @@ def init_db():
                 id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS services(
+                id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, target_seconds INTEGER NOT NULL,
+                active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
             cur.execute("""CREATE TABLE IF NOT EXISTS cars(
                 id SERIAL PRIMARY KEY, plate TEXT NOT NULL, service TEXT NOT NULL,
                 worker_id INTEGER NOT NULL REFERENCES workers(id),
                 started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), finished_at TIMESTAMPTZ,
-                duration_seconds INTEGER, notes TEXT, make TEXT, model TEXT, company TEXT, plate_photo BYTEA, plate_photo_mime TEXT
+                duration_seconds INTEGER, target_seconds INTEGER, notes TEXT, make TEXT, model TEXT, company TEXT, plate_photo BYTEA, plate_photo_mime TEXT
             )"""
             )
             for company in ["Particular", "Empresa 1", "Empresa 2", "Empresa 3"]:
                 cur.execute("INSERT INTO companies(name) VALUES(%s) ON CONFLICT(name) DO NOTHING", (company,))
+            # Servicios definitivos del lavadero. Los objetivos se mantienen también al actualizar
+            # una instalación existente para que coincidan con la configuración acordada.
+            for name, minutes in [("Lavado exterior",30),("Lavado interior + exterior",90),("Limpieza integral",150),("Repaso coche",15)]:
+                cur.execute("""INSERT INTO services(name,target_seconds) VALUES(%s,%s)
+                               ON CONFLICT(name) DO UPDATE SET target_seconds=EXCLUDED.target_seconds, active=TRUE""",
+                            (name, minutes*60))
+            # Ocultamos los nombres de servicio de ejemplo de versiones anteriores.
+            cur.execute("UPDATE services SET active=FALSE WHERE name IN ('Lavado completo','Lavado interior','Premium')")
             # Compatibilidad con bases ya creadas en versiones anteriores.
             cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS make TEXT")
             cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS model TEXT")
             cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS company TEXT")
             cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS plate_photo BYTEA")
             cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS plate_photo_mime TEXT")
+            cur.execute("ALTER TABLE cars ADD COLUMN IF NOT EXISTS target_seconds INTEGER")
             users=[
                 ("admin","Administrador","admin","1234"),("juan","Juan","worker","1234"),
                 ("pedro","Pedro","worker","1234"),("antonio","Antonio","worker","1234"),
@@ -105,23 +118,76 @@ def dashboard():
     u=current_user()
     with conn() as c:
         with c.cursor() as cur:
+            # Coches que siguen en proceso.
             if u["role"]=="admin":
                 cur.execute("""SELECT c.*,w.name worker_name FROM cars c JOIN workers w ON w.id=c.worker_id
                                WHERE c.finished_at IS NULL ORDER BY c.started_at""")
                 active=cur.fetchall()
-                cur.execute("SELECT COUNT(*) n FROM cars WHERE finished_at::date=CURRENT_DATE")
-                completed=cur.fetchone()["n"]
             else:
                 cur.execute("""SELECT c.*,w.name worker_name FROM cars c JOIN workers w ON w.id=c.worker_id
                                WHERE c.finished_at IS NULL AND c.worker_id=%s ORDER BY c.started_at""",(u["id"],))
                 active=cur.fetchall()
-                cur.execute("SELECT COUNT(*) n FROM cars WHERE worker_id=%s AND finished_at::date=CURRENT_DATE",(u["id"],))
-                completed=cur.fetchone()["n"]
             cur.execute("SELECT id,name FROM workers WHERE active=TRUE AND role='worker' ORDER BY name")
             workers=cur.fetchall()
             cur.execute("SELECT id,name FROM companies WHERE active=TRUE ORDER BY name")
             companies=cur.fetchall()
-    return render_template("dashboard.html",user=u,active=active,completed=completed,workers=workers,companies=companies)
+            cur.execute("SELECT id,name,target_seconds FROM services WHERE active=TRUE ORDER BY name")
+            services=cur.fetchall()
+
+            # Resumen de los últimos 7 días para administración.
+            if u["role"]=="admin":
+                cur.execute("""SELECT
+                    COUNT(*) AS cars,
+                    COALESCE(ROUND(AVG(duration_seconds)/60.0,1),0) AS avg_min,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN target_seconds>0 AND duration_seconds>0 THEN target_seconds::numeric/NULLIF(duration_seconds,0) ELSE NULL END),1),0) AS performance_pct,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN target_seconds>0 AND duration_seconds>0 AND duration_seconds<=target_seconds THEN 1.0 ELSE 0.0 END),1),0) AS on_time_pct,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN target_seconds>0 AND duration_seconds>0 AND duration_seconds>target_seconds THEN 1.0 ELSE 0.0 END),1),0) AS late_pct
+                    FROM cars
+                    WHERE finished_at IS NOT NULL AND finished_at >= CURRENT_DATE - INTERVAL '6 days'""")
+            else:
+                cur.execute("""SELECT
+                    COUNT(*) AS cars,
+                    COALESCE(ROUND(AVG(duration_seconds)/60.0,1),0) AS avg_min,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN target_seconds>0 AND duration_seconds>0 THEN target_seconds::numeric/NULLIF(duration_seconds,0) ELSE NULL END),1),0) AS performance_pct,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN target_seconds>0 AND duration_seconds>0 AND duration_seconds<=target_seconds THEN 1.0 ELSE 0.0 END),1),0) AS on_time_pct,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN target_seconds>0 AND duration_seconds>0 AND duration_seconds>target_seconds THEN 1.0 ELSE 0.0 END),1),0) AS late_pct
+                    FROM cars
+                    WHERE finished_at IS NOT NULL AND worker_id=%s AND finished_at >= CURRENT_DATE - INTERVAL '6 days'""",(u["id"],))
+            summary=cur.fetchone()
+
+            if u["role"]=="admin":
+                cur.execute("""SELECT d::date day,
+                    COUNT(c.id) cars,
+                    COALESCE(ROUND(AVG(c.duration_seconds)/60.0,1),0) avg_min,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN c.target_seconds>0 AND c.duration_seconds>0 THEN c.target_seconds::numeric/NULLIF(c.duration_seconds,0) ELSE NULL END),1),0) performance_pct
+                    FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') d
+                    LEFT JOIN cars c ON c.finished_at::date=d::date AND c.finished_at IS NOT NULL
+                    GROUP BY d::date ORDER BY day""")
+                daily=cur.fetchall()
+                cur.execute("""SELECT service,COUNT(*) cars,
+                    COALESCE(ROUND(AVG(duration_seconds)/60.0,1),0) avg_min,
+                    COALESCE(ROUND(AVG(target_seconds)/60.0,1),0) target_min
+                    FROM cars WHERE finished_at IS NOT NULL AND finished_at >= CURRENT_DATE - INTERVAL '6 days'
+                    GROUP BY service ORDER BY cars DESC, service LIMIT 6""")
+                service_summary=cur.fetchall()
+                cur.execute("""SELECT w.name,COUNT(c.id) cars,
+                    COALESCE(ROUND(AVG(c.duration_seconds)/60.0,1),0) avg_min,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN c.target_seconds>0 AND c.duration_seconds>0 THEN c.target_seconds::numeric/NULLIF(c.duration_seconds,0) ELSE NULL END),1),0) performance_pct
+                    FROM workers w LEFT JOIN cars c ON c.worker_id=w.id AND c.finished_at IS NOT NULL AND c.finished_at >= CURRENT_DATE - INTERVAL '6 days'
+                    WHERE w.role='worker' AND w.active=TRUE GROUP BY w.id ORDER BY performance_pct DESC,w.name LIMIT 6""")
+                worker_summary=cur.fetchall()
+            else:
+                cur.execute("""SELECT d::date day,
+                    COUNT(c.id) cars,
+                    COALESCE(ROUND(AVG(c.duration_seconds)/60.0,1),0) avg_min,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN c.target_seconds>0 AND c.duration_seconds>0 THEN c.target_seconds::numeric/NULLIF(c.duration_seconds,0) ELSE NULL END),1),0) performance_pct
+                    FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') d
+                    LEFT JOIN cars c ON c.finished_at::date=d::date AND c.worker_id=%s AND c.finished_at IS NOT NULL
+                    GROUP BY d::date ORDER BY day""",(u["id"],))
+                daily=cur.fetchall(); service_summary=[]; worker_summary=[]
+
+    return render_template("dashboard.html",user=u,active=active,workers=workers,companies=companies,services=services,
+                           summary=summary,daily=daily,service_summary=service_summary,worker_summary=worker_summary)
 
 @app.post("/cars/start")
 @login_required
@@ -147,9 +213,15 @@ def start_car():
         return redirect(url_for("dashboard"))
     with conn() as c:
         with c.cursor() as cur:
-            cur.execute("""INSERT INTO cars(plate,service,worker_id,started_at,make,model,company,plate_photo,plate_photo_mime)
-                           VALUES(%s,%s,%s,NOW(),%s,%s,%s,%s,%s)""",
-                        (plate,service,worker_id,make,model,company,photo_bytes,photo_mime))
+            cur.execute("SELECT target_seconds FROM services WHERE name=%s AND active=TRUE", (service,))
+            service_row=cur.fetchone()
+            if not service_row:
+                flash("Selecciona un servicio válido.")
+                return redirect(url_for("dashboard"))
+            target_seconds=service_row["target_seconds"]
+            cur.execute("""INSERT INTO cars(plate,service,worker_id,started_at,target_seconds,make,model,company,plate_photo,plate_photo_mime)
+                           VALUES(%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s)""",
+                        (plate,service,worker_id,target_seconds,make,model,company,photo_bytes,photo_mime))
     return redirect(url_for("dashboard"))
 
 @app.get("/cars/<int:car_id>/plate-photo")
@@ -207,11 +279,46 @@ def stats():
         with c.cursor() as cur:
             cur.execute("""SELECT w.id,w.name,COUNT(c.id) FILTER(WHERE c.finished_at IS NOT NULL) cars,
                     COALESCE(ROUND(AVG(c.duration_seconds) FILTER(WHERE c.finished_at IS NOT NULL)/60.0,1),0) avg_min,
-                    COALESCE(SUM(c.duration_seconds) FILTER(WHERE c.finished_at IS NOT NULL),0) total_sec
+                    COALESCE(ROUND(AVG(c.target_seconds) FILTER(WHERE c.finished_at IS NOT NULL)/60.0,1),0) target_min,
+                    COALESCE(SUM(c.duration_seconds) FILTER(WHERE c.finished_at IS NOT NULL),0) total_sec,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN c.finished_at IS NOT NULL AND c.target_seconds>0 THEN c.target_seconds::numeric/NULLIF(c.duration_seconds,0) ELSE NULL END),1),0) performance_pct,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN c.finished_at IS NOT NULL AND c.target_seconds>0 AND c.duration_seconds<=c.target_seconds THEN 1.0 ELSE 0.0 END),1),0) on_time_pct
                     FROM workers w LEFT JOIN cars c ON c.worker_id=w.id
-                    WHERE w.role='worker' AND w.active=TRUE GROUP BY w.id ORDER BY cars DESC,w.name""")
+                    WHERE w.role='worker' AND w.active=TRUE GROUP BY w.id ORDER BY performance_pct DESC,w.name""")
             rows=cur.fetchall()
-    return render_template("stats.html",user=current_user(),rows=rows)
+            cur.execute("""SELECT service,COUNT(*) cars,
+                    COALESCE(ROUND(AVG(duration_seconds)/60.0,1),0) avg_min,
+                    COALESCE(ROUND(AVG(target_seconds)/60.0,1),0) target_min,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN target_seconds>0 THEN target_seconds::numeric/NULLIF(duration_seconds,0) ELSE NULL END),1),0) performance_pct,
+                    COALESCE(ROUND(100.0*AVG(CASE WHEN target_seconds>0 AND duration_seconds<=target_seconds THEN 1.0 ELSE 0.0 END),1),0) on_time_pct
+                    FROM cars WHERE finished_at IS NOT NULL GROUP BY service ORDER BY service""")
+            service_rows=cur.fetchall()
+    return render_template("stats.html",user=current_user(),rows=rows,service_rows=service_rows)
+
+@app.route("/services",methods=["GET","POST"])
+@admin_required
+def services():
+    if request.method=="POST":
+        name=request.form.get("name","").strip()
+        minutes=int(request.form.get("minutes",0) or 0)
+        if name and minutes>0:
+            with conn() as c:
+                with c.cursor() as cur:
+                    cur.execute("INSERT INTO services(name,target_seconds) VALUES(%s,%s) ON CONFLICT(name) DO UPDATE SET target_seconds=EXCLUDED.target_seconds, active=TRUE",(name,minutes*60))
+        return redirect(url_for("services"))
+    with conn() as c:
+        with c.cursor() as cur:
+            cur.execute("SELECT id,name,target_seconds,active FROM services ORDER BY active DESC,name")
+            rows=cur.fetchall()
+    return render_template("services.html",user=current_user(),rows=rows)
+
+@app.post("/services/<int:service_id>/toggle")
+@admin_required
+def toggle_service(service_id):
+    with conn() as c:
+        with c.cursor() as cur:
+            cur.execute("UPDATE services SET active=NOT active WHERE id=%s",(service_id,))
+    return redirect(url_for("services"))
 
 @app.route("/companies",methods=["GET","POST"])
 @admin_required

@@ -1,33 +1,21 @@
-# Lavadero V4 — Railway
+# Lavadero V10
 
-Aplicación Flask para lavadero de coches con PostgreSQL. Esta versión añade marca, modelo y empresa/cliente al coche, y migra automáticamente columnas nuevas en bases existentes.
+Versión móvil responsive con resumen de productividad de los últimos 7 días.
 
-## Railway
-1. Sube este proyecto a un repositorio de GitHub.
-2. En Railway, dentro del proyecto que ya tiene Postgres, selecciona **GitHub Repository** y el repositorio.
-3. Railway debe proporcionar `DATABASE_URL` al servicio si se referencia la base PostgreSQL.
-4. Añade una variable `SECRET_KEY` con un valor aleatorio largo.
-5. Despliega. El comando es `gunicorn app:app --bind 0.0.0.0:$PORT`.
+Incluye:
+- Login de administrador y trabajadores.
+- PostgreSQL con migraciones automáticas.
+- Matrícula manual y foto obligatoria del coche.
+- Marca, modelo y empresa predeterminada.
+- Servicios con tiempos objetivo:
+  - Lavado exterior: 30 min
+  - Lavado interior + exterior: 90 min
+  - Limpieza integral: 150 min
+  - Repaso coche: 15 min
+- Cronómetro en tiempo real.
+- Historial con foto.
+- Resumen del lavadero de los últimos 7 días.
+- Rendimiento global, por servicio y por trabajador.
+- Gestión de trabajadores, empresas y servicios.
 
-La aplicación crea automáticamente las tablas y 10 usuarios de prueba al arrancar.
-
-Credenciales iniciales de prueba:
-admin / 1234
-juan / 1234
-pedro / 1234
-antonio / 1234
-manuel / 1234
-carlos / 1234
-david / 1234
-miguel / 1234
-jose / 1234
-luis / 1234
-
-IMPORTANTE: cambia las contraseñas antes de uso real.
-
-## Empresas
-La V6 añade una tabla de empresas/clientes con listado desplegable. Se crean inicialmente Particular, Empresa 1, Empresa 2 y Empresa 3; el administrador puede añadir, activar u ocultar empresas desde /companies.
-
-
-## V8 - Foto obligatoria del coche
-La matrícula se introduce manualmente. No se utiliza OCR. Para iniciar un servicio, el trabajador debe hacer y adjuntar una foto desde el móvil; la foto se guarda junto al registro y queda disponible en el historial.
+Railway: usa el Procfile y la variable PORT automáticamente.
