@@ -45,8 +45,6 @@ def init_db():
                 site_url TEXT, api_url TEXT, client_id TEXT, client_secret TEXT,
                 redirect_uri TEXT, albaran_endpoint TEXT
             )""")
-            for n in ["site_url TEXT","api_url TEXT","client_id TEXT","client_secret TEXT","redirect_uri TEXT","albaran_endpoint TEXT"]:
-                col(c,"contasimple_config",""+n.split()[0],n.split()[1])
             c.execute("""CREATE TABLE IF NOT EXISTS service_prices(
                 id SERIAL PRIMARY KEY, company TEXT NOT NULL, service TEXT NOT NULL,
                 base_price NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -54,17 +52,13 @@ def init_db():
             )""")
             c.execute("""CREATE TABLE IF NOT EXISTS albaran_sync(
                 id SERIAL PRIMARY KEY, car_id INTEGER UNIQUE REFERENCES cars(id) ON DELETE CASCADE,
-                status TEXT NOT NULL DEFAULT 'pending', external_id TEXT,
-                error TEXT, created_at TIMESTAMPTZ DEFAULT NOW()
+                status TEXT NOT NULL DEFAULT 'pending', external_id TEXT, error TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
             )""")
             c.execute("""CREATE TABLE IF NOT EXISTS checklist_items(
                 id SERIAL PRIMARY KEY, car_id INTEGER REFERENCES cars(id) ON DELETE CASCADE,
                 item TEXT NOT NULL, ok BOOLEAN DEFAULT FALSE, reviewed BOOLEAN DEFAULT FALSE,
                 UNIQUE(car_id,item))""")
-            c.execute("ALTER TABLE checklist_items ADD COLUMN IF NOT EXISTS status TEXT DEFAULT NULL")
-            c.execute("""UPDATE checklist_items
-                         SET status=CASE WHEN reviewed THEN 'repasado' WHEN ok THEN 'ok' ELSE NULL END
-                         WHERE status IS NULL""")
             defaults=[("admin","Administrador","admin","admin123")]+[(x.lower(),x,"worker","1234") for x in WORKERS]
             for u,n,r,p in defaults:
                 c.execute("""INSERT INTO users(username,name,role,password_hash,must_change_password)
@@ -127,10 +121,6 @@ def contasimple_authorize_url():
                  "redirect_uri":cfg["redirect_uri"],"scope":"offline_access"})
     return cfg["site_url"].rstrip("/")+"/login.aspx?"+q
 
-def contasimple_tokens():
-    cfg=contasimple_settings()
-    return (cfg["access_token"],cfg["refresh_token"],cfg["expires_at"]) if cfg else None
-
 def contasimple_refresh():
     cfg=contasimple_settings()
     if not cfg["refresh_token"] or not cfg["api_url"]: return False
@@ -151,7 +141,6 @@ def contasimple_refresh():
 
 def contasimple_create_albaran(car_id):
     cfg=contasimple_settings()
-    if not cfg["albaran_endpoint"]: return False,"Falta configurar el endpoint de albaranes"
     with db() as conn:
         with conn.cursor() as c:
             c.execute("""SELECT c.id,c.plate,c.company,c.service,c.finished_at,u.name,
@@ -163,126 +152,39 @@ def contasimple_create_albaran(car_id):
             c.execute("INSERT INTO albaran_sync(car_id,status) VALUES(%s,'pending') ON CONFLICT(car_id) DO NOTHING",(car_id,))
             conn.commit()
     if not car:return False,"Coche no encontrado"
+    if not cfg["albaran_endpoint"]:return False,"Endpoint de albaranes no configurado"
     if not cfg["access_token"]:return False,"Contasimple no está conectado"
     payload={"plate":car[1],"company":car[2],"service":car[3],
              "date":car[4].isoformat() if car[4] else None,
              "base_price":float(car[6]),"worker":car[5]}
     try:
         r=requests.post(cfg["albaran_endpoint"],
-                        headers={"Authorization":"Bearer "+cfg["access_token"],"Content-Type":"application/json"},
+                        headers={"Authorization":"Bearer "+cfg["access_token"],
+                                 "Content-Type":"application/json"},
                         json=payload,timeout=20)
         if r.status_code==401 and contasimple_refresh():
             cfg=contasimple_settings()
             r=requests.post(cfg["albaran_endpoint"],
-                            headers={"Authorization":"Bearer "+cfg["access_token"],"Content-Type":"application/json"},
+                            headers={"Authorization":"Bearer "+cfg["access_token"],
+                                     "Content-Type":"application/json"},
                             json=payload,timeout=20)
         r.raise_for_status()
         data=r.json() if r.content else {}
         ext=str(data.get("id") or data.get("number") or data.get("albaran_id") or "")
         with db() as conn:
-            with conn.cursor() as c:c.execute("UPDATE albaran_sync SET status='sent',external_id=%s,error=NULL WHERE car_id=%s",(ext,car_id))
+            with conn.cursor() as c:
+                c.execute("UPDATE albaran_sync SET status='sent',external_id=%s,error=NULL WHERE car_id=%s",(ext,car_id))
             conn.commit()
         return True,ext
     except Exception as e:
         with db() as conn:
-            with conn.cursor() as c:c.execute("UPDATE albaran_sync SET status='error',error=%s WHERE car_id=%s",(str(e)[:1000],car_id))
+            with conn.cursor() as c:
+                c.execute("UPDATE albaran_sync SET status='error',error=%s WHERE car_id=%s",(str(e)[:1000],car_id))
             conn.commit()
         return False,str(e)[:300]
 
 @app.context_processor
 def ctx(): return {"user":me(),"companies":COMPANIES,"services":SERVICES}
-@app.route("/admin/contasimple/settings",methods=["POST"])
-@admin
-def contasimple_settings_save():
-    fields={
-        "site_url":request.form.get("site_url","").strip(),
-        "api_url":request.form.get("api_url","").strip(),
-        "client_id":request.form.get("client_id","").strip(),
-        "client_secret":request.form.get("client_secret","").strip(),
-        "redirect_uri":request.form.get("redirect_uri","").strip(),
-        "albaran_endpoint":request.form.get("albaran_endpoint","").strip()
-    }
-    with db() as conn:
-        with conn.cursor() as c:
-            c.execute("""INSERT INTO contasimple_config(id,site_url,api_url,client_id,client_secret,redirect_uri,albaran_endpoint)
-                         VALUES(1,%(site_url)s,%(api_url)s,%(client_id)s,%(client_secret)s,%(redirect_uri)s,%(albaran_endpoint)s)
-                         ON CONFLICT(id) DO UPDATE SET site_url=EXCLUDED.site_url,api_url=EXCLUDED.api_url,
-                         client_id=EXCLUDED.client_id,client_secret=EXCLUDED.client_secret,
-                         redirect_uri=EXCLUDED.redirect_uri,albaran_endpoint=EXCLUDED.albaran_endpoint""",fields)
-        conn.commit()
-    flash("Credenciales y configuración de Contasimple guardadas.","success")
-    return redirect(url_for("contasimple"))
-
-@app.route("/admin/contasimple")
-@admin
-def contasimple():
-    tok=contasimple_tokens()
-    connected=bool(tok and tok[0])
-    with db() as conn:
-        with conn.cursor() as c:
-            for company in COMPANIES:
-                for service in SERVICES:
-                    c.execute("INSERT INTO service_prices(company,service,base_price) VALUES(%s,%s,0) ON CONFLICT(company,service) DO NOTHING",(company,service))
-            c.execute("SELECT company,service,base_price FROM service_prices ORDER BY id")
-            prices=c.fetchall()
-            c.execute("""SELECT a.car_id,a.status,a.external_id,a.error,c.plate,c.company,c.service
-                         FROM albaran_sync a JOIN cars c ON c.id=a.car_id
-                         ORDER BY a.created_at DESC LIMIT 100""")
-            syncs=c.fetchall()
-        conn.commit()
-    return render_template("contasimple.html",connected=connected,auth_url=contasimple_authorize_url(),prices=prices,syncs=syncs,cfg=contasimple_settings())
-
-@app.route("/admin/contasimple/prices",methods=["POST"])
-@admin
-def contasimple_prices():
-    with db() as conn:
-        with conn.cursor() as c:
-            for company in COMPANIES:
-                for service in SERVICES:
-                    raw=request.form.get(f"p_{company}_{service}","0").replace(",",".")
-                    try: price=max(0,float(raw or 0))
-                    except: price=0
-                    c.execute("""INSERT INTO service_prices(company,service,base_price) VALUES(%s,%s,%s)
-                                 ON CONFLICT(company,service) DO UPDATE SET base_price=EXCLUDED.base_price""",
-                              (company,service,price))
-        conn.commit()
-    flash("Tarifas guardadas.","success")
-    return redirect(url_for("contasimple"))
-
-@app.route("/admin/contasimple/callback")
-@admin
-def contasimple_callback():
-    code=request.args.get("code")
-    cfg=contasimple_settings()
-    if not code or not cfg["api_url"]:return redirect(url_for("contasimple"))
-    try:
-        r=requests.post(cfg["api_url"].rstrip("/")+"/oauth/token",data={
-            "grant_type":"authorization_code","client_id":cfg["client_id"],
-            "client_secret":cfg["client_secret"],"code":code,
-            "redirect_uri":cfg["redirect_uri"]},timeout=20)
-        r.raise_for_status(); data=r.json()
-        from datetime import datetime,timedelta,timezone
-        exp=datetime.now(timezone.utc)+timedelta(seconds=int(data.get("expires_in",3600)))
-        with db() as conn:
-            with conn.cursor() as c:
-                c.execute("""INSERT INTO contasimple_config(id,access_token,refresh_token,expires_at,connected_at)
-                             VALUES(1,%s,%s,%s,NOW())
-                             ON CONFLICT(id) DO UPDATE SET access_token=EXCLUDED.access_token,
-                             refresh_token=EXCLUDED.refresh_token,expires_at=EXCLUDED.expires_at,connected_at=NOW()""",
-                          (data.get("access_token"),data.get("refresh_token"),exp))
-            conn.commit()
-        flash("Contasimple conectado.","success")
-    except Exception as e:flash("No se pudo conectar con Contasimple: "+str(e)[:200],"error")
-    return redirect(url_for("contasimple"))
-
-@app.route("/admin/contasimple/retry/<int:cid>",methods=["POST"])
-@admin
-def contasimple_retry(cid):
-    ok,msg=contasimple_create_albaran(cid)
-    flash(("Albarán enviado: " if ok else "No se pudo enviar: ")+str(msg),"success" if ok else "error")
-    return redirect(url_for("contasimple"))
-
-
 
 @app.route("/")
 @auth
@@ -372,11 +274,8 @@ def checklist_save(cid):
             c.execute("SELECT id FROM cars WHERE id=%s AND worker_id=%s AND service='Repaso' AND finished_at IS NULL",(cid,u[0],))
             if not c.fetchone():return redirect(url_for("worker"))
             for i,item in enumerate(CHECKLIST):
-                status=request.form.get(f"status_{i}") or None
-                c.execute("""UPDATE checklist_items
-                             SET status=%s, ok=%s, reviewed=%s
-                             WHERE car_id=%s AND item=%s""",
-                          (status, status=="ok", status=="repasado", cid, item))
+                c.execute("UPDATE checklist_items SET ok=%s,reviewed=%s WHERE car_id=%s AND item=%s",
+                          (request.form.get(f"ok_{i}")=="1",request.form.get(f"reviewed_{i}")=="1",cid,item))
         conn.commit()
     flash("Checklist guardado.","success"); return redirect(url_for("worker"))
 
@@ -389,7 +288,7 @@ def finish(cid):
             c.execute("SELECT service FROM cars WHERE id=%s AND worker_id=%s AND finished_at IS NULL",(cid,u[0],)); r=c.fetchone()
             if not r:return redirect(url_for("worker"))
             if r[0]=="Repaso":
-                c.execute("SELECT COUNT(*) FROM checklist_items WHERE car_id=%s AND status IS NULL",(cid,))
+                c.execute("SELECT COUNT(*) FROM checklist_items WHERE car_id=%s AND (NOT ok OR NOT reviewed)",(cid,))
                 if c.fetchone()[0]:
                     flash("Completa todos los puntos del checklist.","error"); return redirect(url_for("worker"))
                 c.execute("UPDATE cars SET checklist_status='done' WHERE id=%s",(cid,))
@@ -397,6 +296,91 @@ def finish(cid):
         conn.commit()
     contasimple_create_albaran(cid)
     return redirect(url_for("worker"))
+
+
+@app.route("/admin/contasimple")
+@admin
+def contasimple():
+    cfg=contasimple_settings()
+    connected=bool(cfg.get("access_token"))
+    with db() as conn:
+        with conn.cursor() as c:
+            for company in COMPANIES:
+                for service in SERVICES:
+                    c.execute("INSERT INTO service_prices(company,service,base_price) VALUES(%s,%s,0) ON CONFLICT(company,service) DO NOTHING",(company,service))
+            c.execute("SELECT company,service,base_price FROM service_prices ORDER BY company,service")
+            prices=c.fetchall()
+            c.execute("""SELECT a.car_id,a.status,a.external_id,a.error,c.plate,c.company,c.service
+                         FROM albaran_sync a JOIN cars c ON c.id=a.car_id
+                         ORDER BY a.created_at DESC LIMIT 100""")
+            syncs=c.fetchall()
+        conn.commit()
+    return render_template("contasimple.html",cfg=cfg,connected=connected,auth_url=contasimple_authorize_url(),
+                           prices=prices,syncs=syncs)
+
+@app.route("/admin/contasimple/settings",methods=["POST"])
+@admin
+def contasimple_settings_save():
+    vals={k:request.form.get(k,"").strip() for k in
+          ["site_url","api_url","client_id","client_secret","redirect_uri","albaran_endpoint"]}
+    with db() as conn:
+        with conn.cursor() as c:
+            c.execute("""INSERT INTO contasimple_config(id,site_url,api_url,client_id,client_secret,redirect_uri,albaran_endpoint)
+                         VALUES(1,%(site_url)s,%(api_url)s,%(client_id)s,%(client_secret)s,%(redirect_uri)s,%(albaran_endpoint)s)
+                         ON CONFLICT(id) DO UPDATE SET site_url=EXCLUDED.site_url,api_url=EXCLUDED.api_url,
+                         client_id=EXCLUDED.client_id,client_secret=EXCLUDED.client_secret,
+                         redirect_uri=EXCLUDED.redirect_uri,albaran_endpoint=EXCLUDED.albaran_endpoint""",vals)
+        conn.commit()
+    flash("Configuración de Contasimple guardada.","success")
+    return redirect(url_for("contasimple"))
+
+@app.route("/admin/contasimple/prices",methods=["POST"])
+@admin
+def contasimple_prices():
+    with db() as conn:
+        with conn.cursor() as c:
+            for company in COMPANIES:
+                for service in SERVICES:
+                    raw=request.form.get(f"p_{company}_{service}","0").replace(",",".")
+                    try: price=max(0,float(raw or 0))
+                    except: price=0
+                    c.execute("""INSERT INTO service_prices(company,service,base_price) VALUES(%s,%s,%s)
+                                 ON CONFLICT(company,service) DO UPDATE SET base_price=EXCLUDED.base_price""",
+                              (company,service,price))
+        conn.commit()
+    flash("Tarifas guardadas.","success"); return redirect(url_for("contasimple"))
+
+@app.route("/admin/contasimple/callback")
+@admin
+def contasimple_callback():
+    code=request.args.get("code"); cfg=contasimple_settings()
+    if not code or not cfg["api_url"]: return redirect(url_for("contasimple"))
+    try:
+        r=requests.post(cfg["api_url"].rstrip("/")+"/oauth/token",data={
+            "grant_type":"authorization_code","client_id":cfg["client_id"],
+            "client_secret":cfg["client_secret"],"code":code,
+            "redirect_uri":cfg["redirect_uri"]},timeout=20)
+        r.raise_for_status(); data=r.json()
+        from datetime import datetime,timedelta,timezone
+        exp=datetime.now(timezone.utc)+timedelta(seconds=int(data.get("expires_in",3600)))
+        with db() as conn:
+            with conn.cursor() as c:
+                c.execute("""INSERT INTO contasimple_config(id,access_token,refresh_token,expires_at,connected_at)
+                             VALUES(1,%s,%s,%s,NOW())
+                             ON CONFLICT(id) DO UPDATE SET access_token=EXCLUDED.access_token,
+                             refresh_token=EXCLUDED.refresh_token,expires_at=EXCLUDED.expires_at,connected_at=NOW()""",
+                          (data.get("access_token"),data.get("refresh_token"),exp))
+            conn.commit()
+        flash("Contasimple conectado.","success")
+    except Exception as e: flash("No se pudo conectar: "+str(e)[:250],"error")
+    return redirect(url_for("contasimple"))
+
+@app.route("/admin/contasimple/retry/<int:cid>",methods=["POST"])
+@admin
+def contasimple_retry(cid):
+    ok,msg=contasimple_create_albaran(cid)
+    flash(("Albarán enviado: " if ok else "No se pudo enviar: ")+str(msg),"success" if ok else "error")
+    return redirect(url_for("contasimple"))
 
 @app.route("/admin")
 @admin
@@ -418,17 +402,8 @@ def admin_dashboard():
 def admin_cars():
     with db() as conn:
         with conn.cursor() as c:
-            c.execute("""SELECT c.id,c.plate,c.brand,c.model,c.company,c.service,u.name,c.actual_minutes,c.target_minutes,c.checklist_status,c.photo_path,
-                         CASE WHEN c.service <> 'Repaso' AND NOT EXISTS (
-                              SELECT 1 FROM cars cl
-                              WHERE cl.plate=c.plate AND cl.service='Repaso'
-                                AND cl.finished_at IS NOT NULL
-                                AND cl.checklist_status='done'
-                                AND cl.started_at >= c.started_at
-                         ) THEN TRUE ELSE FALSE END AS checklist_pending
-                         FROM cars c JOIN users u ON u.id=c.worker_id
-                         WHERE c.service <> 'Repaso'
-                         ORDER BY c.started_at DESC LIMIT 500"""); cars=c.fetchall()
+            c.execute("""SELECT c.id,c.plate,c.brand,c.model,c.company,c.service,u.name,c.actual_minutes,c.target_minutes,c.checklist_status,c.photo_path
+                         FROM cars c JOIN users u ON u.id=c.worker_id ORDER BY c.started_at DESC LIMIT 500"""); cars=c.fetchall()
     return render_template("cars.html",cars=cars)
 
 @app.route("/admin/checklists")
@@ -438,20 +413,7 @@ def admin_checklists():
         with conn.cursor() as c:
             c.execute("""SELECT c.id,c.plate,c.brand,c.model,c.company,u.name,c.started_at
                          FROM cars c JOIN users u ON u.id=c.worker_id
-                         WHERE c.service <> 'Repaso'
-                           AND NOT EXISTS (
-                               SELECT 1 FROM cars cl
-                               WHERE cl.plate=c.plate AND cl.service='Repaso'
-                                 AND cl.finished_at IS NOT NULL
-                                 AND cl.checklist_status='done'
-                                 AND cl.started_at >= c.started_at
-                           )
-                           AND c.id = (
-                               SELECT c2.id FROM cars c2
-                               WHERE c2.plate=c.plate AND c2.service <> 'Repaso'
-                               ORDER BY c2.started_at DESC LIMIT 1
-                           )
-                         ORDER BY c.started_at DESC"""); rows=c.fetchall()
+                         WHERE c.service='Repaso' AND c.checklist_status='pending' ORDER BY c.started_at DESC"""); rows=c.fetchall()
     return render_template("checklists.html",rows=rows)
 
 @app.route("/admin/workers")
