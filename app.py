@@ -205,8 +205,17 @@ def admin_dashboard():
 def admin_cars():
     with db() as conn:
         with conn.cursor() as c:
-            c.execute("""SELECT c.id,c.plate,c.brand,c.model,c.company,c.service,u.name,c.actual_minutes,c.target_minutes,c.checklist_status,c.photo_path
-                         FROM cars c JOIN users u ON u.id=c.worker_id ORDER BY c.started_at DESC LIMIT 500"""); cars=c.fetchall()
+            c.execute("""SELECT c.id,c.plate,c.brand,c.model,c.company,c.service,u.name,c.actual_minutes,c.target_minutes,c.checklist_status,c.photo_path,
+                         CASE WHEN c.service <> 'Repaso' AND NOT EXISTS (
+                              SELECT 1 FROM cars cl
+                              WHERE cl.plate=c.plate AND cl.service='Repaso'
+                                AND cl.finished_at IS NOT NULL
+                                AND cl.checklist_status='done'
+                                AND cl.started_at >= c.started_at
+                         ) THEN TRUE ELSE FALSE END AS checklist_pending
+                         FROM cars c JOIN users u ON u.id=c.worker_id
+                         WHERE c.service <> 'Repaso'
+                         ORDER BY c.started_at DESC LIMIT 500"""); cars=c.fetchall()
     return render_template("cars.html",cars=cars)
 
 @app.route("/admin/checklists")
@@ -216,7 +225,20 @@ def admin_checklists():
         with conn.cursor() as c:
             c.execute("""SELECT c.id,c.plate,c.brand,c.model,c.company,u.name,c.started_at
                          FROM cars c JOIN users u ON u.id=c.worker_id
-                         WHERE c.service='Repaso' AND c.checklist_status='pending' ORDER BY c.started_at DESC"""); rows=c.fetchall()
+                         WHERE c.service <> 'Repaso'
+                           AND NOT EXISTS (
+                               SELECT 1 FROM cars cl
+                               WHERE cl.plate=c.plate AND cl.service='Repaso'
+                                 AND cl.finished_at IS NOT NULL
+                                 AND cl.checklist_status='done'
+                                 AND cl.started_at >= c.started_at
+                           )
+                           AND c.id = (
+                               SELECT c2.id FROM cars c2
+                               WHERE c2.plate=c.plate AND c2.service <> 'Repaso'
+                               ORDER BY c2.started_at DESC LIMIT 1
+                           )
+                         ORDER BY c.started_at DESC"""); rows=c.fetchall()
     return render_template("checklists.html",rows=rows)
 
 @app.route("/admin/workers")
