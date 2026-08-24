@@ -2,12 +2,12 @@
 <body><header class="top"><h1>💶 Contasimple</h1><p>Configuración y tarifas</p></header><main class="container">
 {% with m=get_flashed_messages(with_categories=true) %}{% for c,x in m %}<div class="flash">{{x}}</div>{% endfor %}{% endwith %}
 <div class="card"><h2>🔐 Credenciales</h2><p style="color:#64748b">Introduce aquí los datos que te facilite Contasimple. No se guarda la contraseña de tu cuenta.</p>
-<form method="post" action="/admin/contasimple/settings">
+<p style="color:#64748b">Puedes guardar solo la URL del portal ahora. Los demás datos de integración se pueden completar más adelante.</p><form method="post" action="/admin/contasimple/settings">
 <label>URL del portal</label><input name="site_url" value="{{cfg.site_url}}" required>
-<label>URL de la API</label><input name="api_url" value="{{cfg.api_url}}" required>
-<label>Client ID</label><input name="client_id" value="{{cfg.client_id}}" required>
-<label>Client Secret</label><input name="client_secret" type="password" value="{{cfg.client_secret}}" required>
-<label>Redirect URI</label><input name="redirect_uri" value="{{cfg.redirect_uri}}" required>
+<label>URL de la API</label><input name="api_url" value="{{cfg.api_url}}">
+<label>Client ID</label><input name="client_id" value="{{cfg.client_id}}">
+<label>Client Secret</label><input name="client_secret" type="password" value="{{cfg.client_secret}}">
+<label>Redirect URI</label><input name="redirect_uri" value="{{cfg.redirect_uri}}">
 <label>Endpoint de creación de albaranes</label><input name="albaran_endpoint" value="{{cfg.albaran_endpoint}}">
 <button class="btn">GUARDAR CONFIGURACIÓN</button></form>
 {% if connected %}<p style="color:#16a34a;font-weight:700">🟢 Contasimple conectado</p>{% elif auth_url %}<a class="btn light" href="{{auth_url}}">CONECTAR CONTASIMPLE</a>{% endif %}
