@@ -4,7 +4,6 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 import psycopg
-from psycopg.rows import dict_row
 
 app=Flask(__name__)
 app.secret_key=os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -13,7 +12,7 @@ if not DATABASE_URL:
     raise RuntimeError("Falta DATABASE_URL. En Railway debe estar conectada la base PostgreSQL.")
 
 def conn():
-   return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    return psycopg.connect(DATABASE_URL)
 
 def init_db():
     with conn() as c:
