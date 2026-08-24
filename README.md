@@ -1,2 +1,1 @@
-# Lavadero V13
-Versión visual móvil empresarial.
+Lavadero V13 completo. Reemplazar archivos del repositorio; conservar PostgreSQL. La app migra columnas automáticamente.
